@@ -24,6 +24,8 @@ const int LED_PIN_R = 5;
 const int LED_PIN_Y = 10;
 
 QueueHandle_t xQueueBtn;
+SemaphoreHandle_t xSemaphoreLedR;
+SemaphoreHandle_t xSemaphoreLedY;
 
 void btn_callback(uint gpio, uint32_t events) {
     if (events & GPIO_IRQ_EDGE_FALL) {
@@ -36,14 +38,12 @@ void led_r_task(void *p) {
     gpio_set_dir(LED_PIN_R, GPIO_OUT);
     gpio_put(LED_PIN_R, 0);
 
-    QueueHandle_t xQueueToggle = (QueueHandle_t)p;
     bool blinking = false;
     bool state = false;
-    int sig;
 
     while (true) {
         TickType_t wait = blinking ? pdMS_TO_TICKS(100) : portMAX_DELAY;
-        if (xQueueReceive(xQueueToggle, &sig, wait) == pdTRUE) {
+        if (xSemaphoreTake(xSemaphoreLedR, wait) == pdTRUE) {
             blinking = !blinking;
             state = false;
             gpio_put(LED_PIN_R, 0);
@@ -59,14 +59,12 @@ void led_y_task(void *p) {
     gpio_set_dir(LED_PIN_Y, GPIO_OUT);
     gpio_put(LED_PIN_Y, 0);
 
-    QueueHandle_t xQueueToggle = (QueueHandle_t)p;
     bool blinking = false;
     bool state = false;
-    int sig;
 
     while (true) {
         TickType_t wait = blinking ? pdMS_TO_TICKS(100) : portMAX_DELAY;
-        if (xQueueReceive(xQueueToggle, &sig, wait) == pdTRUE) {
+        if (xSemaphoreTake(xSemaphoreLedY, wait) == pdTRUE) {
             blinking = !blinking;
             state = false;
             gpio_put(LED_PIN_Y, 0);
@@ -78,12 +76,6 @@ void led_y_task(void *p) {
 }
 
 void btn_task(void* p) {
-    QueueHandle_t xQueueToggleR = xQueueCreate(8, sizeof(int));
-    QueueHandle_t xQueueToggleY = xQueueCreate(8, sizeof(int));
-
-    xTaskCreate(led_r_task, "LED_R_Task", 256, (void*)xQueueToggleR, 1, NULL);
-    xTaskCreate(led_y_task, "LED_Y_Task", 256, (void*)xQueueToggleY, 1, NULL);
-
     gpio_init(BTN_PIN_R);
     gpio_set_dir(BTN_PIN_R, GPIO_IN);
     gpio_pull_up(BTN_PIN_R);
@@ -96,13 +88,12 @@ void btn_task(void* p) {
     gpio_set_irq_enabled(BTN_PIN_Y, GPIO_IRQ_EDGE_FALL, true);
 
     int gpio;
-    int sig = 1;
     while (true) {
         if (xQueueReceive(xQueueBtn, &gpio, portMAX_DELAY) == pdTRUE) {
             if (gpio == BTN_PIN_R) {
-                xQueueSend(xQueueToggleR, &sig, 0);
+                xSemaphoreGive(xSemaphoreLedR);
             } else if (gpio == BTN_PIN_Y) {
-                xQueueSend(xQueueToggleY, &sig, 0);
+                xSemaphoreGive(xSemaphoreLedY);
             }
         }
     }
@@ -114,8 +105,12 @@ int main() {
     stdio_init_all();
 
     xQueueBtn = xQueueCreate(16, sizeof(int));
+    xSemaphoreLedR = xSemaphoreCreateBinary();
+    xSemaphoreLedY = xSemaphoreCreateBinary();
 
     xTaskCreate(btn_task, "BTN_Task 1", 512, NULL, 1, NULL);
+    xTaskCreate(led_r_task, "LED_R_Task", 256, NULL, 1, NULL);
+    xTaskCreate(led_y_task, "LED_Y_Task", 256, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
